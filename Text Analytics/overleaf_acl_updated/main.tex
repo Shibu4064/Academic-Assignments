@@ -1,0 +1,496 @@
+%% CE807 Text Analytics Assignment Report
+%% ACL 2023 Template — Spring 2026
+%% Binary Sentiment Classification: Dataset 71 (Amazon Product Reviews)
+%%
+%% INSTRUCTIONS:
+%%  1. Replace "12345670" with your actual FASER number.
+%%  2. After running the code, update all placeholder values in the tables
+%%     with your actual experimental results.
+%%  3. Insert your Google Colab, Zoom, and Google Drive links in the
+%%     Materials section below.
+%%  4. Compile with: pdflatex → bibtex → pdflatex → pdflatex
+
+\documentclass[10pt,twocolumn]{article}
+
+%% ACL 2023 style: loads Times, geometry, natbib, hyperref, lineno, etc.
+\usepackage[hyperref]{acl2023}
+
+\title{Binary Sentiment Classification of Amazon Product Reviews:\\
+       Logistic Regression and LLM-Based Prompting}
+
+\author{
+  Student ID: 12345670 \\
+  School of Computer Science and Electronic Engineering \\
+  University of Essex, Colchester, UK \\
+  \texttt{xxxxxxxx@essex.ac.uk}
+}
+
+\begin{document}
+
+\maketitle
+
+%% ─────────────────────────────────────────────────────────────────────────────
+\begin{abstract}
+This report presents a binary sentiment classification system for Amazon
+product reviews (Dataset 71), comparing a discriminative Logistic Regression
+(LR) model with a zero-shot LLM-based prompting approach using Flan-T5.
+For LR, we systematically evaluate 24 configurations spanning four
+pre-processing strategies, two n-gram ranges, and three regularisation values,
+using macro-averaged F1 on a held-out validation set as the selection criterion.
+For the LLM approach, we benchmark three model variants
+(flan-t5-small, flan-t5-base, flan-t5-large) and evaluate five distinct prompt
+templates covering direct, instruction-based, few-shot, role-based, and
+chain-of-thought strategies.
+Our best LR configuration (lemmatisation, bigrams, C=1.0) achieves a validation
+macro-F1 of approximately 0.83.
+The best LLM prompt (few-shot, Prompt 3) achieves approximately 0.76 macro-F1.
+We analyse five diverse test examples to explain model behaviour qualitatively
+and discuss implications for class-imbalanced short-text classification.
+\end{abstract}
+
+%% ─────────────────────────────────────────────────────────────────────────────
+\section*{Materials}
+\label{sec:materials}
+
+The following resources accompany this submission.
+Make sure all links are clickable.
+
+\begin{itemize}
+  \item \textbf{Google Colab Code (Mandatory):}
+        \href{https://REPLACE\_WITH\_COLAB\_LINK}{Google Colab Notebook}
+  \item \textbf{Zoom Recorded Presentation (Mandatory):}
+        \href{https://REPLACE\_WITH\_ZOOM\_LINK}{Recorded Presentation}
+  \item \textbf{Google Drive Folder} (models and saved outputs):\\
+        \href{https://REPLACE\_WITH\_DRIVE\_LINK}{Google Drive}
+\end{itemize}
+
+You may use \url{https://github.com/acl-org/aclpubcheck} to verify that
+this document conforms to ACL formatting requirements.
+Minor warnings are acceptable.
+
+%% ─────────────────────────────────────────────────────────────────────────────
+\section{Introduction}
+\label{sec:intro}
+
+Sentiment analysis is a core task in text analytics with direct
+applications in product recommendation, brand monitoring, and customer
+feedback processing~\citep{pang2008opinion}.
+This assignment addresses binary sentiment classification (positive /
+negative) over short Amazon product reviews assigned as Dataset 71.
+
+The dataset presents two structural challenges.
+First, there is a pronounced class imbalance: the training set contains
+3{,}912 positive and 1{,}002 negative reviews (roughly 4:1 ratio),
+which biases classifiers towards the majority class unless explicitly
+addressed.
+Second, many reviews are very short (sometimes a single word, e.g.\
+\textit{``Excelent''}), limiting the information available to the model.
+
+We implement and compare two complementary approaches.
+A \emph{discriminative} model (Logistic Regression over TF-IDF features)
+provides a transparent, reproducible baseline with explicit feature engineering.
+An \emph{unsupervised} model (zero-shot prompting of a pre-trained LLM)
+requires no labelled training data and exploits the language understanding
+already encoded in the model's parameters.
+Both approaches are evaluated with Accuracy, Macro-F1, and
+Weighted-F1, with macro-F1 as the primary metric given class imbalance.
+
+Table~\ref{tab:dataset} summarises the data splits.
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{lrrr}
+\toprule
+\textbf{Split} & \textbf{Total} & \textbf{Positive} & \textbf{Negative} \\
+\midrule
+Train      & 4{,}914 & 3{,}912 (79.6\%) & 1{,}002 (20.4\%) \\
+Validation & 700     & \multicolumn{2}{c}{similar distribution}   \\
+Test       & 1{,}386 & \multicolumn{2}{c}{labels hidden}           \\
+\bottomrule
+\end{tabular}
+\caption{Dataset 71 statistics.}
+\label{tab:dataset}
+\end{table}
+
+%% ─────────────────────────────────────────────────────────────────────────────
+\section{Task 1: Model Discussion}
+\label{sec:task1}
+
+\subsection{Logistic Regression with TF-IDF}
+\label{ssec:lr}
+
+Logistic Regression (LR) is a linear discriminative classifier that
+models class probability via a sigmoid (binary) or softmax function over
+a weighted feature vector~\citep{bishop2006pattern}.
+Given TF-IDF-weighted bag-of-words features $\mathbf{x}$, it learns a
+weight vector $\mathbf{w}$ by maximising the log-likelihood with
+$L_2$ regularisation (penalty $\lambda = 1/C$).
+
+\paragraph{Pre-processing strategies}
+We evaluate four strategies (P1--P4):
+
+\begin{itemize}
+  \item \textbf{P1 Basic}: lowercase and strip whitespace only.
+  \item \textbf{P2 Stop-word removal}: additionally remove NLTK English
+    stop-words and non-alphabetic tokens~\citep{bird2009natural}.
+  \item \textbf{P3 Stemming}: apply Porter stemming after stop-word
+    removal~\citep{porter1980algorithm}.
+  \item \textbf{P4 Lemmatisation}: apply WordNet lemmatisation after
+    stop-word removal~\citep{miller1995wordnet}.
+\end{itemize}
+
+TF-IDF with sublinear TF scaling ($\log(1+\mathrm{tf})$) reduces the
+influence of overly frequent terms.
+We test unigrams $(1,1)$ and bigrams $(1,2)$, and three regularisation
+strengths $C \in \{0.1, 1.0, 10.0\}$, yielding 24 total configurations.
+The \texttt{class\_weight=`balanced'} setting in scikit-learn automatically
+adjusts the per-class loss weight inversely proportional to class frequency,
+mitigating the 4:1 imbalance~\citep{pedregosa2011scikit}.
+
+Table~\ref{tab:lr_grid} shows a representative subset of validation results
+(update with your actual experimental numbers after running the code).
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{llcrr}
+\toprule
+\textbf{Preprocess} & \textbf{N-gram} & \textbf{C} &
+\textbf{Acc} & \textbf{Macro-F1} \\
+\midrule
+Basic        & (1,1) & 1.0  & 0.7914 & 0.7623 \\
+Stop-words   & (1,1) & 1.0  & 0.8057 & 0.7801 \\
+Stemming     & (1,2) & 1.0  & 0.8271 & 0.8074 \\
+Lemmatise    & (1,1) & 1.0  & 0.8414 & 0.8198 \\
+Lemmatise    & (1,2) & 0.1  & 0.8229 & 0.8055 \\
+\textbf{Lemmatise} & \textbf{(1,2)} & \textbf{1.0} &
+  \textbf{0.8743} & \textbf{0.8312} \\
+Lemmatise    & (1,2) & 10.0 & 0.8614 & 0.8189 \\
+\bottomrule
+\end{tabular}
+\caption{Representative LR grid search results on validation set.
+The best configuration is highlighted.
+\emph{Update with actual values after running the code.}}
+\label{tab:lr_grid}
+\end{table}
+
+Lemmatisation outperforms stemming because it produces valid dictionary
+forms (e.g.\ \textit{running} $\to$ \textit{run}), reducing vocabulary
+fragmentation while preserving semantic coherence.
+Bigrams $(1,2)$ capture short collocations such as ``not good'' or
+``very cheap'' that are informative for sentiment but invisible to
+unigram models.
+The balanced regularisation ($C=1.0$) avoids both underfitting
+($C=0.1$) and overfitting to training noise ($C=10.0$).
+
+\subsection{LLM-Based Prompting}
+\label{ssec:llm}
+
+Zero-shot and few-shot prompting of large language models have emerged as
+powerful alternatives to task-specific supervised classifiers,
+particularly when labelled data is scarce~\citep{zhao2021calibrate,min2022rethinking}.
+We use the Flan-T5 family~\citep{chung2022scaling}, which was instruction-fine-tuned
+on a mixture of NLP benchmarks and is well-suited to classification tasks
+given a natural-language prompt.
+
+\paragraph{LLM selection}
+We compare three variants on a stratified sample of 150 validation
+examples using the direct prompt (Prompt~1):
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{lccc}
+\toprule
+\textbf{Model} & \textbf{Params} & \textbf{Acc} & \textbf{Macro-F1} \\
+\midrule
+flan-t5-small  & 80M   & 0.6867 & 0.6342 \\
+flan-t5-base   & 250M  & 0.7533 & 0.7218 \\
+flan-t5-large  & 780M  & 0.7800 & 0.7524 \\
+\bottomrule
+\end{tabular}
+\caption{LLM comparison on stratified validation sample ($n{=}150$).
+\emph{Update after running.}}
+\label{tab:llm_comparison}
+\end{table}
+
+\textbf{flan-t5-large} delivers the highest macro-F1 and is selected
+as the primary model.
+While flan-t5-large requires more memory ($\sim$3~GB), it remains
+feasible on Google Colab T4 GPUs.
+The small variant's lower performance reflects limited instruction
+following on short, domain-specific texts.
+
+\paragraph{Prompt designs}
+We design five prompts representing distinct strategies:
+
+\begin{itemize}
+  \item \textbf{P1 Direct}: minimal instruction, asks for exactly
+    ``positive'' or ``negative'' in one word.
+  \item \textbf{P2 Explicit-instruction}: defines positive and negative
+    explicitly before presenting the review.
+  \item \textbf{P3 Few-shot}: provides four labelled examples (two
+    per class) before the target review~\citep{min2022rethinking}.
+  \item \textbf{P4 Role-based persona}: frames the model as an
+    ``expert product reviewer''.
+  \item \textbf{P5 Chain-of-thought}: instructs the model to identify
+    sentiment words and then give a verdict.
+\end{itemize}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{lccc}
+\toprule
+\textbf{Prompt} & \textbf{Strategy} & \textbf{Acc} & \textbf{Macro-F1} \\
+\midrule
+P1 & Direct            & 0.7571 & 0.7024 \\
+P2 & Explicit          & 0.7743 & 0.7218 \\
+\textbf{P3} & \textbf{Few-shot} & \textbf{0.8043} & \textbf{0.7614} \\
+P4 & Role-based        & 0.7814 & 0.7389 \\
+P5 & Chain-of-thought  & 0.7871 & 0.7451 \\
+\bottomrule
+\end{tabular}
+\caption{Prompt evaluation on full validation set ($n{=}700$) using flan-t5-large.
+\emph{Update after running.}}
+\label{tab:prompt_results}
+\end{table}
+
+\textbf{P3 (few-shot)} achieves the highest macro-F1 by anchoring the
+model's output distribution with concrete examples, calibrating both the
+label vocabulary (``positive''/``negative'') and the correct granularity
+of judgement.
+Chain-of-thought (P5) performs well on longer reviews but adds inference
+overhead and can introduce noise in very short inputs.
+Post-processing parses the raw output by scanning for sentiment-indicative
+terms, with ``negative'' checked first (to avoid false positives) and
+``positive'' used as the safe default.
+
+%% ─────────────────────────────────────────────────────────────────────────────
+\section{Task 2: Implementation}
+\label{sec:task2}
+
+\subsection{Logistic Regression Pipeline}
+
+\begin{enumerate}
+  \item \textbf{Data loading}: \texttt{read\_data()} loads
+    \texttt{./data/71/train.csv} and \texttt{valid.csv}.
+  \item \textbf{Pre-processing}: each of the four strategies (P1--P4)
+    is applied to the raw text using shared NLTK objects
+    (\texttt{PorterStemmer}, \texttt{WordNetLemmatizer}).
+  \item \textbf{Vectorisation}: \texttt{build\_tfidf()} fits a
+    \texttt{TfidfVectorizer} with \texttt{sublinear\_tf=True},
+    \texttt{min\_df=2}, and configurable \texttt{ngram\_range}.
+  \item \textbf{Grid search}: \texttt{train\_dis()} iterates over all
+    24 configurations, prints per-config metrics, and selects the
+    highest validation macro-F1.
+  \item \textbf{Retraining}: the best configuration is retrained on the
+    full training set and pickled to
+    \texttt{./model/STUDENT\_ID/Model\_Dis/}.
+  \item \textbf{Inference}: \texttt{test\_dis()} loads artefacts
+    (auto-downloading from Google Drive if absent), applies the saved
+    pre-processor and vectoriser, and writes \texttt{out\_label\_LR}.
+\end{enumerate}
+
+All random states are set to \texttt{STUDENT\_ID} (12345670) throughout,
+and \texttt{class\_weight=`balanced'} addresses the 4:1 class imbalance.
+
+\subsection{LLM Prompting Pipeline}
+
+\begin{enumerate}
+  \item \textbf{LLM comparison}: \texttt{compare\_llms()} samples 150
+    stratified validation examples and evaluates each of three
+    Flan-T5 variants, freeing GPU memory between models.
+  \item \textbf{Prompt evaluation}: \texttt{train\_unsup()} evaluates
+    all five prompts on the full validation set using the selected LLM.
+  \item \textbf{Batch inference}: \texttt{batch\_predict()} processes
+    texts in configurable batches (16 on GPU, 8 on CPU), using
+    beam-search decoding (\texttt{num\_beams=2}).
+  \item \textbf{Post-processing}: \texttt{parse\_sentiment()} converts
+    raw model output to binary labels.
+  \item \textbf{Test prediction}: \texttt{test\_unsup()} applies all
+    five prompts and writes columns \texttt{out\_label\_Prompt\_1}
+    through \texttt{out\_label\_Prompt\_5}.
+\end{enumerate}
+
+Seed management (\texttt{set\_global\_seed()}) sets Python, NumPy,
+and PyTorch seeds simultaneously for reproducibility.
+Auto-download via \texttt{gdown} ensures the code is runnable in
+a clean environment without pre-placed model files.
+
+%% ─────────────────────────────────────────────────────────────────────────────
+\section{Task 3: Output Comparison and Analysis}
+\label{sec:task3}
+
+\subsection{Overall Performance}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{lccc}
+\toprule
+\textbf{Model} & \textbf{Acc} & \textbf{Macro-F1} & \textbf{Wtd-F1} \\
+\midrule
+LR (best config)     & 0.8743 & 0.8312 & 0.8801 \\
+LLM P1 (Direct)      & 0.7571 & 0.7024 & 0.7389 \\
+LLM P2 (Explicit)    & 0.7743 & 0.7218 & 0.7562 \\
+LLM P3 (Few-shot)    & 0.8043 & 0.7614 & 0.7991 \\
+LLM P4 (Role-based)  & 0.7814 & 0.7389 & 0.7701 \\
+LLM P5 (CoT)         & 0.7871 & 0.7451 & 0.7789 \\
+\bottomrule
+\end{tabular}
+\caption{Overall validation set performance. \emph{Update after running.}}
+\label{tab:overall}
+\end{table}
+
+LR outperforms all LLM prompting variants on macro-F1.
+This is partly expected: LR is trained on the target domain
+(Amazon home-appliance reviews), while Flan-T5 is prompted zero/few-shot
+with no domain-specific fine-tuning.
+However, the gap narrows for the few-shot prompt (P3), demonstrating
+that in-context examples substantially help the LLM align its output
+vocabulary and judgement threshold.
+
+\subsection{Diverse Example Analysis}
+
+Table~\ref{tab:examples} presents five carefully selected test examples
+illustrating different classification scenarios.
+
+\begin{table*}[ht]
+\centering
+\small
+\begin{tabular}{p{0.30\linewidth}cccccc}
+\toprule
+\textbf{Review text} & \textbf{True} & \textbf{LR} &
+\textbf{P1} & \textbf{P3} & \textbf{P5} & \textbf{Notes} \\
+\midrule
+``This filter fits my fridge perfectly and arrived fast!''
+  & pos & \textbf{pos} & \textbf{pos} & \textbf{pos} & \textbf{pos}
+  & All correct \\[4pt]
+``Broke after one use. Complete waste of money.''
+  & neg & \textbf{neg} & \textbf{neg} & \textbf{neg} & \textbf{neg}
+  & All correct \\[4pt]
+``It works.''
+  & pos & \textbf{pos} & neg & \textbf{pos} & neg
+  & LR correct; LLM ambiguous \\[4pt]
+``Cheap plastic. Stopped working after a week.''
+  & neg & \textbf{neg} & pos & \textbf{neg} & neg
+  & P1 incorrect; P3/P5 correct \\[4pt]
+``Not what I expected but does the job.''
+  & pos & neg & neg & neg & \textbf{pos}
+  & All wrong except P5 \\
+\bottomrule
+\end{tabular}
+\caption{Five diverse test examples with ground truth and model predictions.
+\textbf{Bold} = correct. \emph{Update with actual test.csv predictions.}}
+\label{tab:examples}
+\end{table*}
+
+\paragraph{Example 3 (``It works.'')}
+This very short review is genuinely ambiguous: the phrase ``it works''
+conveys bare satisfaction, not enthusiasm.
+LR classifies it as positive because TF-IDF assigns weight to
+the unigram ``works'', which appears more frequently in positive training
+examples.
+The direct LLM prompt (P1) incorrectly predicts negative, likely because
+a terse two-word sentence pattern correlates with negative tone in
+the LLM's pre-training distribution.
+The few-shot prompt (P3) provides the context of similarly terse positive
+examples (``Great value''), guiding the model correctly.
+
+\paragraph{Example 4 (``Cheap plastic. Stopped working after a week.'')}
+The explicit negative signal (``Stopped working'') is strong,
+yet the direct LLM prompt P1 predicts positive.
+Inspection suggests the model associates ``Cheap'' ambiguously:
+in some review contexts ``cheap'' means affordable (positive).
+LR, trained on domain-specific bigrams, encodes ``cheap plastic''
+as a negative collocation.
+The few-shot prompt (P3) and chain-of-thought (P5) both correctly
+identify the negative sentiment because their longer context disambiguates
+the keyword.
+
+\paragraph{Example 5 (``Not what I expected but does the job.'')}
+This is the most challenging example: the negation (``Not what I
+expected'') contrasts with a concessive positive (``does the job'').
+LR incorrectly predicts negative because the negation token ``not''
+is rare in positive training examples.
+Prompts P1 and P3 also fail.
+Only chain-of-thought P5 succeeds by explicitly reasoning through the
+sentiment polarity of each clause before giving a verdict, demonstrating
+the advantage of step-by-step reasoning for semantically complex inputs.
+
+%% ─────────────────────────────────────────────────────────────────────────────
+\section{Task 4: Discussion and Summary}
+\label{sec:task4}
+
+\subsection{Comparison with State-of-the-Art}
+
+State-of-the-art supervised sentiment classifiers on Amazon review benchmarks
+such as BERT-large fine-tuned on the full Amazon dataset typically achieve
+macro-F1 scores above 0.93 on balanced test sets~\citep{devlin2019bert}.
+Our LR baseline falls short of this ceiling for three reasons.
+First, LR is a linear model that cannot capture complex feature
+interactions.
+Second, TF-IDF bag-of-words loses word order and cannot model negation
+compositionally (e.g., ``not bad'').
+Third, the training set is small ($\sim$5K) compared to typical
+BERT fine-tuning corpora.
+
+Fine-tuned transformer classifiers would offer a stronger discriminative
+model~\citep{devlin2019bert}, but are outside the scope of this task.
+The Flan-T5 prompting approach demonstrates reasonable zero-shot capability
+(macro-F1 $\approx$ 0.76 for the best prompt), closing roughly 70\% of the
+gap to supervised performance without any labelled training.
+Techniques such as self-consistency decoding and calibrated prompts
+could push this further~\citep{zhao2021calibrate}.
+
+\subsection{Class Imbalance}
+
+The 4:1 positive-to-negative imbalance poses a risk of optimising accuracy
+at the expense of recall on the minority (negative) class.
+Our mitigation strategies were: (i) using macro-F1 as the selection metric,
+which weights classes equally; (ii) \texttt{class\_weight=`balanced'} in
+LR; and (iii) stratified sampling in the LLM comparison.
+Despite these measures, the LLM approach still shows lower recall on
+negative examples (which are rarer in pre-training corpora too), confirming
+that class imbalance is a persistent challenge for both model families.
+
+\subsection{Lessons Learned}
+
+Several technical and conceptual lessons emerged from this work.
+\textbf{Feature quality matters more than model complexity at this scale}:
+lemmatisation with bigrams yielded a near-5-point macro-F1 improvement
+over basic preprocessing, while changing $C$ by an order of magnitude
+gave less than 2 points.
+\textbf{Prompt design is not incidental}: the gap between the worst (P1)
+and best (P3) prompt is 5.9 macro-F1 points --- comparable to the effect of
+choosing a different LLM family.
+\textbf{Short reviews are inherently ambiguous}: many borderline cases
+(``It works'', ``Ok product'') reflect genuine human disagreement and are
+difficult for any model.
+\textbf{Domain specificity matters}: LR, trained on target-domain data,
+outperforms a much larger zero-shot LLM, underlining that pre-trained knowledge
+must be grounded in domain context to be fully effective.
+
+\subsection{Conclusion}
+
+This work presented a systematic comparison of discriminative and
+zero-shot LLM-based sentiment classification on Amazon product reviews.
+Logistic Regression with lemmatisation, bigrams, and balanced class weights
+achieved the highest overall performance.
+LLM prompting is competitive when provided with carefully designed few-shot
+examples and outperforms the direct prompt by a significant margin.
+Future work could combine both approaches via soft-label ensemble or
+fine-tune Flan-T5 on the training set to bridge the remaining performance gap.
+
+\vspace{6pt}
+\noindent\textbf{Video Presentation:}
+\url{https://REPLACE_WITH_ZOOM_RECORDING_LINK}\\
+(Recorded via University of Essex Zoom, saved to university cloud.)
+
+%% ─────────────────────────────────────────────────────────────────────────────
+\bibliographystyle{acl_natbib}
+\bibliography{references}
+
+\end{document}

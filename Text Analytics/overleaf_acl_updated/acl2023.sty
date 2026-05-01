@@ -1,0 +1,122 @@
+%% acl2023.sty — ACL 2023 compatible style
+%% Matches the ACL format shown in the CE807 assignment report PDF:
+%%   • US Letter, 1-inch margins, 0.25-inch column gutter
+%%   • Times New Roman at 10 pt body text
+%%   • Three-digit zero-padded line numbers (001, 002 …) in margins
+%%   • Bold run-in paragraph headings; bold section/subsection heads
+%%   • natbib author–year citations; small bold-label captions
+%%   • Coloured hyperlinks (blue)
+\NeedsTeXFormat{LaTeX2e}
+\ProvidesPackage{acl2023}[2023/07/01 ACL 2023 compatible]
+
+\DeclareOption{hyperref}{}
+\ProcessOptions\relax
+
+%% ── Page geometry ────────────────────────────────────────────────────────────
+\RequirePackage{geometry}
+\geometry{
+  letterpaper,
+  top    = 1in,
+  bottom = 1in,
+  left   = 1in,
+  right  = 1in,
+  columnsep  = 0.25in,
+  headheight = 0pt,
+  headsep    = 0pt
+}
+
+%% ── Typography — Times New Roman (ACL standard) ──────────────────────────────
+\RequirePackage{times}
+\RequirePackage[T1]{fontenc}
+\RequirePackage[utf8]{inputenc}
+\RequirePackage{microtype}
+\frenchspacing
+
+%% ── Maths ────────────────────────────────────────────────────────────────────
+\RequirePackage{amsmath}
+\RequirePackage{amssymb}
+\RequirePackage{latexsym}
+
+%% ── Tables and figures ───────────────────────────────────────────────────────
+\RequirePackage{booktabs}
+\RequirePackage{graphicx}
+\RequirePackage{multirow}
+\RequirePackage{array}
+
+%% ── Captions: small text, bold label, period separator ───────────────────────
+\RequirePackage{caption}
+\captionsetup{
+  font            = small,
+  labelfont       = bf,
+  labelsep        = period,
+  justification   = raggedright,
+  singlelinecheck = false
+}
+
+%% ── Colour, URLs, hyperlinks ─────────────────────────────────────────────────
+\RequirePackage{xcolor}
+\RequirePackage{url}
+\urlstyle{same}
+\RequirePackage[
+  colorlinks  = true,
+  linkcolor   = blue!70!black,
+  citecolor   = blue!70!black,
+  urlcolor    = blue!70!black,
+  pdfborder   = {0 0 0}
+]{hyperref}
+
+%% ── Citations — ACL natbib (author, year) ────────────────────────────────────
+\RequirePackage{natbib}
+\bibpunct{(}{)}{;}{a}{,}{,}
+\setlength{\bibsep}{1.5pt plus 0.5pt}
+\renewcommand{\bibfont}{\small}
+
+%% ── Section headings — ACL style ─────────────────────────────────────────────
+%%  \section      bold, normal size
+%%  \subsection   bold, normal size
+%%  \subsubsection italic, normal size
+%%  \paragraph    bold run-in, followed by a period
+\RequirePackage{titlesec}
+
+\titleformat{\section}
+  {\normalfont\normalsize\bfseries}{\thesection}{0.6em}{}
+\titleformat{\subsection}
+  {\normalfont\normalsize\bfseries}{\thesubsection}{0.6em}{}
+\titleformat{\subsubsection}
+  {\normalfont\normalsize\itshape}{\thesubsubsection}{0.6em}{}
+\titleformat{\paragraph}[runin]
+  {\normalfont\normalsize\bfseries}{}{0pt}{}[.]
+\titleformat{\subparagraph}[runin]
+  {\normalfont\normalsize\itshape}{}{0pt}{}[.]
+
+\titlespacing*{\section}
+  {0pt}{8pt plus 3pt minus 2pt}{4pt plus 1pt}
+\titlespacing*{\subsection}
+  {0pt}{6pt plus 2pt minus 1pt}{3pt plus 1pt}
+\titlespacing*{\subsubsection}
+  {0pt}{5pt plus 2pt minus 1pt}{2pt}
+\titlespacing*{\paragraph}
+  {0pt}{4pt plus 1pt minus 1pt}{0.5em}
+\titlespacing*{\subparagraph}
+  {0pt}{3pt}{0.5em}
+
+%% ── Paragraph spacing ────────────────────────────────────────────────────────
+\setlength{\parskip}{0pt}
+\setlength{\parindent}{1em}
+
+%% ── Line numbers — ACL submission / review mode ──────────────────────────────
+%%  Three-digit zero-padded format matching the PDF report: 001, 002, 003 …
+\RequirePackage[mathlines]{lineno}
+\renewcommand\linenumberfont{\normalfont\tiny\sffamily\color{gray}}
+\setlength\linenumbersep{6pt}
+
+%% Zero-pad line numbers to three digits
+\renewcommand\thelinenumber{%
+  \ifnum\value{linenumber}<10 00\fi
+  \ifnum\value{linenumber}<100 0\fi
+  \arabic{linenumber}%
+}
+
+\linenumbers
+
+\endinput
